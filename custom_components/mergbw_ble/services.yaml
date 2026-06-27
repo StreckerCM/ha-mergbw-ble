@@ -1,0 +1,49 @@
+set_scene_id:
+  name: Set scene by id
+  description: >-
+    Fire any raw built-in scene by numeric id (1-117) — the full "Other" pattern
+    set, beyond the named effects in the dropdown.
+  target:
+    entity:
+      integration: mergbw_ble
+      domain: light
+  fields:
+    scene_id:
+      name: Scene id
+      description: Raw scene id (1-117; some ids in 76-83 are unused).
+      required: true
+      example: 97
+      selector:
+        number:
+          min: 1
+          max: 255
+          mode: box
+    speed:
+      name: Speed
+      description: Animation speed (0-100).
+      required: false
+      default: 50
+      selector:
+        number:
+          min: 0
+          max: 100
+          mode: slider
+
+set_music_sensitivity:
+  name: Set music sensitivity
+  description: Set the music-reactive sensitivity (0-100).
+  target:
+    entity:
+      integration: mergbw_ble
+      domain: light
+  fields:
+    level:
+      name: Level
+      description: Sensitivity 0-100.
+      required: true
+      example: 100
+      selector:
+        number:
+          min: 0
+          max: 100
+          mode: slider

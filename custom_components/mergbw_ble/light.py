@@ -19,35 +19,42 @@ from homeassistant.components.light import (
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_ADDRESS
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import config_validation as cv, entity_platform
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+import voluptuous as vol
 
 from . import control
 from .const import DEFAULT_NAME, DOMAIN, WRITE_CHARACTERISTIC_UUID
 
 _LOGGER = logging.getLogger(__name__)
 
-# Effect name -> scene id. IDs are PROVISIONAL (reverse-engineered); the MeRGBW
-# app actually uses a 2-byte scene + speed scheme. Refine with a capture that
-# cycles through each named effect. See docs/protocol.md.
-EFFECTS: dict[str, int] = {
-    "Fantasy": 0x80,
-    "Green Prairie": 0x81,
-    "Forest": 0x82,
-    "Sunrise": 0x83,
-    "Ghost": 0x84,
-    "Midsummer": 0x85,
-    "Tropical Twilight": 0x86,
-    "Disco": 0x87,
-    "Alarm": 0x88,
-    "Aurora": 0x89,
-    "Savanah": 0x8B,
-    "Lake Placid": 0x8C,
-    "Neon": 0x8D,
-    "Sundowner": 0x8E,
-    "Blue Star": 0x8F,
-    "Red Rose": 0x90,
-    "Autumn": 0x93,
+# Default scene animation speed (0-100) sent after selecting a scene.
+DEFAULT_SCENE_SPEED = 50
+
+# Curated scene effects (the app's "Scenes" + "Festival" tabs) -> scene id.
+# Verified from a PacketLogger capture (see docs/protocol.md). These are
+# friendly aliases over the device's ~109 raw patterns; the full raw set is
+# reachable via the `set_scene_id` service (1-117) to avoid a 140-item dropdown.
+SCENE_EFFECTS: dict[str, int] = {
+    # Scenes
+    "Symphony": 2, "Energy": 3, "Jump": 4, "Vitality": 7, "Accumulation": 16,
+    "Chase": 23, "Space-time": 45, "Ephemeral": 35, "Flow": 55, "Forest": 13,
+    "Neon Lights": 48, "Green Jade": 71, "Running": 91, "Pink Light": 109,
+    "Alarm": 113, "Aurora": 59, "Rainbow": 26, "Melody": 32,
+    # Festival
+    "Christmas": 8, "Halloween": 11, "Valentines Day": 5, "New Year": 116,
+    "Candlelight": 3, "Birthday": 111, "Ghost": 6, "Party": 8, "Carnival": 4,
+    "Disco": 102, "Sweet": 12, "Romantic": 11, "Dating": 29, "Ball": 26,
+    "Game": 1,
 }
+
+# Music-reactive modes (cmd 0x07).
+MUSIC_EFFECTS: dict[str, int] = {
+    "Music Spectrum 1": 2, "Music Spectrum 2": 5, "Music Spectrum 3": 6,
+    "Flowing": 3, "Rolling": 1, "Rhythm": 4,
+}
+
+EFFECT_LIST = list(SCENE_EFFECTS) + list(MUSIC_EFFECTS)
 
 
 async def async_setup_entry(
@@ -60,6 +67,24 @@ async def async_setup_entry(
     name: str = entry.title or DEFAULT_NAME
     async_add_entities([MeRGBWLight(hass, address, name)])
 
+    # Services for the raw scenes (the ~109 "Other" patterns) + music sensitivity.
+    platform = entity_platform.async_get_current_platform()
+    platform.async_register_entity_service(
+        "set_scene_id",
+        {
+            vol.Required("scene_id"): vol.All(vol.Coerce(int), vol.Range(min=1, max=255)),
+            vol.Optional("speed", default=DEFAULT_SCENE_SPEED): vol.All(
+                vol.Coerce(int), vol.Range(min=0, max=100)
+            ),
+        },
+        "async_set_scene_id",
+    )
+    platform.async_register_entity_service(
+        "set_music_sensitivity",
+        {vol.Required("level"): vol.All(vol.Coerce(int), vol.Range(min=0, max=100))},
+        "async_set_music_sensitivity",
+    )
+
 
 class MeRGBWLight(LightEntity):
     """A MeRGBW BLE light. State is optimistic (the device is write-only)."""
@@ -71,7 +96,7 @@ class MeRGBWLight(LightEntity):
     _attr_supported_color_modes = {ColorMode.HS}
     _attr_color_mode = ColorMode.HS
     _attr_supported_features = LightEntityFeature.EFFECT
-    _attr_effect_list = list(EFFECTS)
+    _attr_effect_list = EFFECT_LIST
 
     def __init__(self, hass: HomeAssistant, address: str, name: str) -> None:
         """Initialise the light."""
@@ -136,9 +161,15 @@ class MeRGBWLight(LightEntity):
             self._attr_hs_color = (hue, sat)
             self._attr_effect = None
 
-        if ATTR_EFFECT in kwargs and kwargs[ATTR_EFFECT] in EFFECTS:
-            await self._write(control.scene(EFFECTS[kwargs[ATTR_EFFECT]]))
-            self._attr_effect = kwargs[ATTR_EFFECT]
+        if ATTR_EFFECT in kwargs:
+            eff = kwargs[ATTR_EFFECT]
+            if eff in SCENE_EFFECTS:
+                await self._write(control.scene(SCENE_EFFECTS[eff]))
+                await self._write(control.scene_speed(DEFAULT_SCENE_SPEED))
+                self._attr_effect = eff
+            elif eff in MUSIC_EFFECTS:
+                await self._write(control.music_mode(MUSIC_EFFECTS[eff]))
+                self._attr_effect = eff
 
         if ATTR_BRIGHTNESS in kwargs:
             await self._write(control.brightness(kwargs[ATTR_BRIGHTNESS]))
@@ -151,6 +182,21 @@ class MeRGBWLight(LightEntity):
         await self._write(control.power(False))
         self._attr_is_on = False
         self.async_write_ha_state()
+
+    async def async_set_scene_id(
+        self, scene_id: int, speed: int = DEFAULT_SCENE_SPEED
+    ) -> None:
+        """Fire any raw scene id (1-117) — the full 'Other' pattern set."""
+        await self._write(control.power(True))
+        await self._write(control.scene(scene_id))
+        await self._write(control.scene_speed(speed))
+        self._attr_is_on = True
+        self._attr_effect = None  # not a named effect
+        self.async_write_ha_state()
+
+    async def async_set_music_sensitivity(self, level: int) -> None:
+        """Set music-reactive sensitivity (0-100)."""
+        await self._write(control.music_sensitivity(level))
 
     async def async_will_remove_from_hass(self) -> None:
         """Disconnect on removal."""

@@ -29,6 +29,9 @@ CMD_POWER = 0x01
 CMD_COLOR = 0x03
 CMD_BRIGHTNESS = 0x05
 CMD_SCENE = 0x06
+CMD_MUSIC = 0x07          # music-reactive mode select
+CMD_MUSIC_SENS = 0x08     # music sensitivity (0-100)
+CMD_SCENE_SPEED = 0x0F    # scene animation speed (0-100)
 
 
 def build_packet(cmd: int, payload: bytes = b"") -> bytes:
@@ -69,5 +72,21 @@ def white() -> bytes:
 
 
 def scene(scene_id: int) -> bytes:
-    """Select a built-in scene/effect by id."""
-    return build_packet(CMD_SCENE, bytes([scene_id & 0xFF]))
+    """Select a built-in scene/effect by id (2-byte payload `00 <id>`)."""
+    return build_packet(CMD_SCENE, (scene_id & 0xFFFF).to_bytes(2, "big"))
+
+
+def scene_speed(speed: int) -> bytes:
+    """Set scene animation speed (0-100). App sends this right after a scene."""
+    s = max(0, min(100, int(speed)))
+    return build_packet(CMD_SCENE_SPEED, bytes([s, 0x00]))
+
+
+def music_mode(value: int) -> bytes:
+    """Select a music-reactive mode by id."""
+    return build_packet(CMD_MUSIC, bytes([value & 0xFF]))
+
+
+def music_sensitivity(pct: int) -> bytes:
+    """Set music sensitivity (0-100)."""
+    return build_packet(CMD_MUSIC_SENS, bytes([max(0, min(100, int(pct)))]))

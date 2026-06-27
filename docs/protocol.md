@@ -28,13 +28,27 @@ via an Apple PacketLogger capture against a "Hexagon Light" panel
 
 ## Commands
 
-| cmd  | meaning     | payload                                                        |
-|------|-------------|---------------------------------------------------------------|
-| 0x01 | power       | 1 byte: `00`=off, `01`=on                                      |
-| 0x03 | colour      | `hue` (u16 BE, 0–360) + `saturation` (u16 BE, 0–1000)          |
-| 0x05 | brightness  | u16 BE, 0–1000                                                 |
-| 0x06 | scene/effect| 1 byte scene id (app uses 2 bytes — see "Open items")          |
-| 0x0F | effect speed| u16 (seen alongside 0x06 in captures)                          |
+| cmd  | meaning      | payload                                                       |
+|------|--------------|--------------------------------------------------------------|
+| 0x01 | power        | 1 byte: `00`=off, `01`=on                                     |
+| 0x03 | colour       | `hue` (u16 BE, 0–360) + `saturation` (u16 BE, 0–1000)         |
+| 0x05 | brightness   | u16 BE, 0–1000                                                |
+| 0x06 | scene/effect | **u16 BE scene id** (`00 <id>`); app follows it with 0x0F     |
+| 0x0F | scene speed  | `<speed> 00` (speed 0–100)                                    |
+| 0x07 | music mode   | 1 byte mode id                                                |
+| 0x08 | music sens.  | 1 byte, 0–100                                                 |
+
+### Scenes / effects (verified 2026-06-26 capture)
+The device exposes **~109 raw scene patterns** (ids 1–117, gaps at 76–83). The
+app's "Scenes" and "Festival" tabs are **friendly aliases** over a subset of
+those ids (some ids reused under multiple names, e.g. id 3 = Energy = Candlelight).
+A scene is selected as `0x06 00<id>` immediately followed by `0x0F <speed> 00`.
+
+Music: `0x07` selects a reactive mode (Spectrum 1/2/3 = 2/5/6, Flowing=3,
+Rolling=1, Rhythm=4); `0x08` sets sensitivity 0–100.
+
+Note: the app's brightness "0%" actually sends `100`/1000 (~10%, its floor);
+this integration maps HA 0–255 → 0–1000 directly, so 0 is genuinely dimmer.
 
 ### Worked examples (verbatim from the capture)
 
@@ -57,8 +71,9 @@ lands a near-zero saturation → washed-out white. Brightness is a **16-bit
 
 ## Open items
 
-* **Effect mapping is provisional.** The app selects effects with a 2-byte
-  `0x06` id plus a `0x0F` speed value (captured ids `0x3b`, `0x71`), not the
-  `0x80`-range single bytes currently mapped in `light.py`. Capture the app
-  cycling through each *named* effect to map them precisely.
+* **Effect names mapped** for the curated Scenes + Festival tabs (see
+  `light.py SCENE_EFFECTS`). The raw 109 "Other" patterns are reachable by id
+  via the `set_scene_id` service rather than cluttering the dropdown.
+* The app has a **"DIY"** custom-pattern option not yet captured — a future
+  sniff could expose overriding device defaults.
 * White / colour-temperature command (if any) is not yet captured.

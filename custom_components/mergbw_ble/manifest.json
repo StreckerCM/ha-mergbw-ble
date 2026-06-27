@@ -1,7 +1,7 @@
 {
   "domain": "mergbw_ble",
   "name": "MeRGBW BLE",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "config_flow": true,
   "documentation": "https://github.com/StreckerCM/ha-mergbw-ble",
   "issue_tracker": "https://github.com/StreckerCM/ha-mergbw-ble/issues",
